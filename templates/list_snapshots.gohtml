@@ -1,0 +1,21 @@
+{{ define "list snapshots" }}
+{{ template "header" }}
+{{ $router := .Router }}
+<h1>{{ formatDateTime .Timestamp }}</h1>
+<ul>
+  {{ range $hostname, $snapshots := .HostMap }}
+    <li>
+      {{ $hostname }}
+      <ul>
+        {{ range $snapshots }}
+          <li>
+            <a href="{{ .GetUrl $router }}">
+              {{ .Title }}
+            </a>
+          </li>
+        {{ end }}
+      </ul>
+    </li>
+  {{ end }}
+</ol>
+{{ end }}
