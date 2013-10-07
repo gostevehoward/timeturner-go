@@ -9,19 +9,13 @@ import (
 	"time"
 )
 
-const DATE_FORMAT = "2006-02-01"
+const DATE_FORMAT = "2006-01-02"
 const TIME_FORMAT = "03:04:05"
-
-type Snapshot struct {
-	Timestamp time.Time
-	Hostname  string
-	Title     string
-}
 
 func (snapshot *Snapshot) GetUrl(router *mux.Router) string {
 	urlParameters := []string{
-		"date", snapshot.Timestamp.Format(DATE_FORMAT),
-		"time", snapshot.Timestamp.Format(TIME_FORMAT),
+		"date", snapshot.Timestamp().Format(DATE_FORMAT),
+		"time", snapshot.Timestamp().Format(TIME_FORMAT),
 		"hostname", snapshot.Hostname,
 		"title", snapshot.Title,
 	}
@@ -33,7 +27,8 @@ func (snapshot *Snapshot) GetUrl(router *mux.Router) string {
 }
 
 type TimeturnerApp struct {
-	Router    *mux.Router
+	*Database
+	*mux.Router
 	Templates *template.Template
 }
 
@@ -48,17 +43,20 @@ func (app *TimeturnerApp) WrapHandler(handler func(*BaseContext)) http.HandlerFu
 	return func(writer http.ResponseWriter, request *http.Request) {
 		log.Printf("Handling %q\n", request.URL)
 		vars := mux.Vars(request)
-		date := vars["date"]
+		date, hasDate := vars["date"]
+		time_, hasTime := vars["time"]
 
 		var timestamp time.Time
 		var err error
-		if time_, hasTime := vars["time"]; hasTime {
-			timestamp, err = time.Parse(DATE_FORMAT+" "+TIME_FORMAT, date+" "+time_)
-		} else {
-			timestamp, err = time.Parse(DATE_FORMAT, date)
+		if hasDate {
+			if hasTime {
+				timestamp, err = time.Parse(DATE_FORMAT+" "+TIME_FORMAT, date+" "+time_)
+			} else {
+				timestamp, err = time.Parse(DATE_FORMAT, date)
+			}
 		}
 		if err != nil {
-			http.Error(writer, err.Error(), http.StatusBadRequest)
+			http.Error(writer, "Failed to parse timestamp: "+err.Error(), http.StatusBadRequest)
 			return
 		}
 
@@ -122,13 +120,13 @@ func ListTimes(context *BaseContext) {
 type ListSnapshotsContext struct {
 	*mux.Router
 	Timestamp time.Time
-	HostMap   map[string][]Snapshot
+	HostMap   map[string][]*Snapshot
 }
 
 func ListSnapshots(context *BaseContext) {
 	// testing only!
-	ms := func(hostname string, title string) Snapshot {
-		return Snapshot{context.Timestamp, hostname, title}
+	ms := func(hostname string, title string) *Snapshot {
+		return &Snapshot{-1, context.Timestamp.Unix(), hostname, title, ""}
 	}
 
 	context.renderTemplate(
@@ -136,16 +134,16 @@ func ListSnapshots(context *BaseContext) {
 		ListSnapshotsContext{
 			context.App.Router,
 			context.Timestamp,
-			map[string][]Snapshot{
-				"host1": []Snapshot{ms("host1", "Processes"), ms("host1", "Queries")},
-				"host2": []Snapshot{ms("host2", "Processes"), ms("host2", "Queries")},
+			map[string][]*Snapshot{
+				"host1": []*Snapshot{ms("host1", "Processes"), ms("host1", "Queries")},
+				"host2": []*Snapshot{ms("host2", "Processes"), ms("host2", "Queries")},
 			},
 		},
 	)
 }
 
 type ViewSnapshotContext struct {
-	Snapshot Snapshot
+	Snapshot *Snapshot
 	Contents string
 }
 
@@ -154,15 +152,15 @@ func HandleSnapshot(context *BaseContext) {
 	context.renderTemplate(
 		"view snapshot",
 		ViewSnapshotContext{
-			Snapshot{context.Timestamp, vars["hostname"], vars["title"]},
+			&Snapshot{-1, context.Timestamp.Unix(), vars["hostname"], vars["title"], ""},
 			"hello world!",
 		},
 	)
 }
 
-func MakeApp() *TimeturnerApp {
-	app := TimeturnerApp{}
-	app.Router = mux.NewRouter()
+func MakeApp(database *Database) *TimeturnerApp {
+	app := TimeturnerApp{Database: database, Router: mux.NewRouter()}
+
 	app.Router.HandleFunc("/", app.WrapHandler(ListDays)).Name("list days")
 	app.Router.HandleFunc("/{date}/", app.WrapHandler(ListTimes)).Name("list times on day")
 	app.Router.HandleFunc("/{date}/{time}", app.WrapHandler(ListSnapshots)).
