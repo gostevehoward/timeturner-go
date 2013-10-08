@@ -12,6 +12,7 @@ import (
 
 const DATE_FORMAT = "2006-01-02"
 const TIME_FORMAT = "15:04:05"
+const DATETIME_FORMAT = "2006-01-02 15:04:05 MST"
 
 func (snapshot *Snapshot) GetUrl(router *mux.Router) string {
 	urlParameters := []string{
@@ -42,7 +43,7 @@ type BaseContext struct {
 
 func (app *TimeturnerApp) WrapHandler(handler func(*BaseContext)) http.HandlerFunc {
 	return func(writer http.ResponseWriter, request *http.Request) {
-		log.Printf("Handling %q\n", request.URL)
+		log.Printf("Handling %v\n", request.URL)
 		vars := mux.Vars(request)
 		date, hasDate := vars["date"]
 		time_, hasTime := vars["time"]
@@ -68,17 +69,15 @@ func (app *TimeturnerApp) WrapHandler(handler func(*BaseContext)) http.HandlerFu
 }
 
 var templateFunctions = template.FuncMap{
-	"formatDate": func(date time.Time) string { return date.Format(DATE_FORMAT) },
-	"formatTime": func(date time.Time) string { return date.Format(TIME_FORMAT) },
-	"formatDateTime": func(date time.Time) string {
-		return date.Format(DATE_FORMAT + " " + TIME_FORMAT)
-	},
+	"formatDate":     func(date time.Time) string { return date.Format(DATE_FORMAT) },
+	"formatTime":     func(date time.Time) string { return date.Format(TIME_FORMAT) },
+	"formatDateTime": func(date time.Time) string { return date.Format(DATETIME_FORMAT) },
 }
 
 func (context *BaseContext) renderTemplate(templateName string, templateContext interface{}) {
 	err := context.App.Templates.ExecuteTemplate(context.Writer, templateName, templateContext)
 	if err != nil {
-		log.Printf("ERROR: Failed to render template %q: %q\n", templateName, err)
+		log.Printf("ERROR: Failed to render template %v: %v\n", templateName, err)
 	}
 }
 

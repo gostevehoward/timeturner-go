@@ -38,7 +38,7 @@ type Database struct {
 
 func InitializeDatabase(connection *sql.DB, nowFunc func() time.Time) *Database {
 	mapper := &gorp.DbMap{Db: connection, Dialect: gorp.SqliteDialect{}}
-	if true {
+	if false {
 		mapper.TraceOn("[gorp]", log.New(os.Stdout, "", log.LstdFlags|log.Lshortfile)) // TODO
 	}
 	mapper.AddTable(Snapshot{}).SetKeys(true, "Id")
@@ -59,13 +59,29 @@ func (database *Database) cleanOldSnapshots() {
 
 func (database *Database) AddSnapshot(timestamp time.Time, hostname string, title string,
 	contents string) {
-	snapshot := &Snapshot{-1, timestamp.Unix(), hostname, title, contents}
-	err := database.mapper.Insert(snapshot)
-	if err != nil {
-		panic(err)
+	snapshot, alreadyExists := database.GetSnapshotWithContents(timestamp, hostname, title)
+	if alreadyExists {
+		snapshot.Contents = contents
+		numUpdated, err := database.mapper.Update(&snapshot)
+		if err != nil {
+			panic(err)
+		}
+		if numUpdated != 1 {
+			panic(
+				fmt.Sprintf(
+					"Updated %d rows overwriting snapshot: timestamp=%v, hostname=%v, title=%v",
+					timestamp, hostname, title,
+				),
+			)
+		}
+	} else {
+		snapshot := &Snapshot{-1, timestamp.Unix(), hostname, title, contents}
+		err := database.mapper.Insert(snapshot)
+		if err != nil {
+			panic(err)
+		}
+		database.cleanOldSnapshots()
 	}
-
-	database.cleanOldSnapshots()
 }
 
 func (database *Database) querySnapshots(query string, args ...interface{}) []Snapshot {
@@ -124,7 +140,7 @@ func (database *Database) GetSnapshotWithContents(timestamp time.Time, hostname 
 		return rows[0], true
 	} else {
 		panic(
-			fmt.Sprintf("Multiple snapshots found: timestamp %q, hostname %q, title %q",
+			fmt.Sprintf("Multiple snapshots found: timestamp %v, hostname %v, title %v",
 				timestamp, hostname, title,
 			),
 		)

@@ -32,11 +32,11 @@ func TestGetAllDays(t *testing.T) {
 	days := database.GetAllDays()
 	expected := []string{"2013-10-06", "2013-10-07"}
 	if len(days) != 2 {
-		t.Fatalf("Unexpected days: %q", days)
+		t.Fatalf("Unexpected days: %v", days)
 	}
 	for index, day := range days {
 		if day.Format("2006-01-02") != expected[index] {
-			t.Fatalf("Unexpected day at %d: %q", index, days)
+			t.Fatalf("Unexpected day at %d: %v", index, days)
 		}
 	}
 }
@@ -48,11 +48,14 @@ func TestGetTimestamps(t *testing.T) {
 	timestamps := database.GetTimestamps(now)
 	expected := []string{"00:00:00", "01:00:00"}
 	if len(timestamps) != 2 {
-		t.Fatalf("Unexpected timestamps: %q", timestamps)
+		t.Fatalf("Unexpected timestamps: %v", timestamps)
 	}
 	for index, timestamp := range timestamps {
 		if timestamp.Format("15:04:05") != expected[index] {
-			t.Fatalf("Unexpected timestamp at %d: %q", index, timestamps)
+			t.Fatalf("Unexpected timestamp at %d: %v", index, timestamps)
+		}
+		if timestamp.Location() != time.Local {
+			t.Fatalf("Expected local timezone, got %b", timestamp.Location())
 		}
 	}
 }
@@ -73,11 +76,11 @@ func TestGetSnapshots(t *testing.T) {
 
 	snapshots := database.GetSnapshots(now)
 	if len(snapshots) != 3 {
-		t.Fatalf("Unexpected snapshots: %q", snapshots)
+		t.Fatalf("Unexpected snapshots: %v", snapshots)
 	}
 	for index, snapshot := range snapshots {
 		if snapshot.Hostname != data[index].Hostname || snapshot.Title != data[index].Title {
-			t.Fatalf("Unexpected snapshot %q (expected %q): %q", snapshot, data[index], snapshots)
+			t.Fatalf("Unexpected snapshot %v (expected %v): %v", snapshot, data[index], snapshots)
 		}
 	}
 }
@@ -94,7 +97,7 @@ func TestGetSnapshotWithContents(t *testing.T) {
 		t.Fatalf("Failed to find snapshot contents")
 	}
 	if snapshot.Contents != expectedContents {
-		t.Fatalf("Unexpected contents: %q", snapshot.Contents)
+		t.Fatalf("Unexpected contents: %v", snapshot.Contents)
 	}
 
 	_, ok = database.GetSnapshotWithContents(now, "host2", "foobar")
@@ -112,10 +115,23 @@ func TestCleanOldSnapshots(t *testing.T) {
 
 	days := database.GetAllDays()
 	if len(days) != 1 {
-		t.Fatalf("Expected just one day: %q", days)
+		t.Fatalf("Expected just one day: %v", days)
 	}
 }
 
-// TODO test no adding duplicate snapshots
+func TestOverwriteExistingSnapshot(t *testing.T) {
+	database := setUp()
 
-// TODO ensure time comes out in local timezone (or switch everything to UTC)
+	database.AddSnapshot(now, "host1", "queries", "hello world")
+	database.AddSnapshot(now, "host1", "queries", "goodbye cruel world")
+
+	snapshots := database.GetSnapshots(now)
+	if len(snapshots) != 1 {
+		t.Fatalf("Expected only one snapshot, found %d", len(snapshots))
+	}
+
+	snapshot, _ := database.GetSnapshotWithContents(now, "host1", "queries")
+	if snapshot.Contents != "goodbye cruel world" {
+		t.Fatalf("Unexpected contents: %v", snapshot.Contents)
+	}
+}
