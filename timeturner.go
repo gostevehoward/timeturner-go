@@ -1,6 +1,7 @@
 package timeturner
 
 import (
+	"fmt"
 	"github.com/gorilla/mux"
 	"html/template"
 	"log"
@@ -50,9 +51,11 @@ func (app *TimeturnerApp) WrapHandler(handler func(*BaseContext)) http.HandlerFu
 		var err error
 		if hasDate {
 			if hasTime {
-				timestamp, err = time.Parse(DATE_FORMAT+" "+TIME_FORMAT, date+" "+time_)
+				timestamp, err = time.ParseInLocation(
+					DATE_FORMAT+" "+TIME_FORMAT, date+" "+time_, time.Local,
+				)
 			} else {
-				timestamp, err = time.Parse(DATE_FORMAT, date)
+				timestamp, err = time.ParseInLocation(DATE_FORMAT, date, time.Local)
 			}
 		}
 		if err != nil {
@@ -87,13 +90,7 @@ type ListDaysContext struct {
 func ListDays(context *BaseContext) {
 	context.renderTemplate(
 		"list days",
-		ListDaysContext{
-			context.App.Router,
-			[]time.Time{
-				time.Date(2013, 10, 4, 0, 0, 0, 0, time.Local),
-				time.Date(2013, 10, 5, 0, 0, 0, 0, time.Local),
-			},
-		},
+		ListDaysContext{context.App.Router, context.App.Database.GetAllDays()},
 	)
 }
 
@@ -109,10 +106,7 @@ func ListTimes(context *BaseContext) {
 		ListTimesContext{
 			context.App.Router,
 			context.Timestamp,
-			[]time.Time{
-				time.Date(2013, 10, 4, 1, 2, 3, 0, time.Local),
-				time.Date(2013, 10, 4, 4, 5, 6, 0, time.Local),
-			},
+			context.App.Database.GetTimestamps(context.Timestamp),
 		},
 	)
 }
@@ -124,38 +118,59 @@ type ListSnapshotsContext struct {
 }
 
 func ListSnapshots(context *BaseContext) {
-	// testing only!
-	ms := func(hostname string, title string) *Snapshot {
-		return &Snapshot{-1, context.Timestamp.Unix(), hostname, title, ""}
+	snapshots := context.App.Database.GetSnapshots(context.Timestamp)
+
+	hostMap := make(map[string][]*Snapshot)
+	for _, snapshot := range snapshots {
+		if _, ok := hostMap[snapshot.Hostname]; !ok {
+			hostMap[snapshot.Hostname] = make([]*Snapshot, 0)
+		}
+		hostMap[snapshot.Hostname] = append(hostMap[snapshot.Hostname], &snapshot)
 	}
 
 	context.renderTemplate(
 		"list snapshots",
-		ListSnapshotsContext{
-			context.App.Router,
-			context.Timestamp,
-			map[string][]*Snapshot{
-				"host1": []*Snapshot{ms("host1", "Processes"), ms("host1", "Queries")},
-				"host2": []*Snapshot{ms("host2", "Processes"), ms("host2", "Queries")},
-			},
-		},
+		ListSnapshotsContext{context.App.Router, context.Timestamp, hostMap},
 	)
+}
+
+func addSnapshot(context *BaseContext) {
+	vars := mux.Vars(context.Request)
+	contents := make([]byte, 1024*1024)
+	bytesRead, err := context.Request.Body.Read(contents)
+	if err != nil {
+		http.Error(
+			context.Writer, "Failed to read request body: "+err.Error(), http.StatusBadRequest,
+		)
+	} else {
+		context.App.Database.AddSnapshot(
+			context.Timestamp, vars["hostname"], vars["title"], string(contents[:bytesRead]),
+		)
+	}
 }
 
 type ViewSnapshotContext struct {
 	Snapshot *Snapshot
-	Contents string
+}
+
+func viewSnapshot(context *BaseContext) {
+	vars := mux.Vars(context.Request)
+	snapshot, ok := context.App.Database.GetSnapshotWithContents(
+		context.Timestamp, vars["hostname"], vars["title"],
+	)
+	if ok {
+		context.renderTemplate("view snapshot", ViewSnapshotContext{&snapshot})
+	} else {
+		http.Error(context.Writer, fmt.Sprintf("No such snapshot found"), http.StatusNotFound)
+	}
 }
 
 func HandleSnapshot(context *BaseContext) {
-	vars := mux.Vars(context.Request)
-	context.renderTemplate(
-		"view snapshot",
-		ViewSnapshotContext{
-			&Snapshot{-1, context.Timestamp.Unix(), vars["hostname"], vars["title"], ""},
-			"hello world!",
-		},
-	)
+	if context.Request.Method == "PUT" {
+		addSnapshot(context)
+	} else {
+		viewSnapshot(context)
+	}
 }
 
 func MakeApp(database *Database) *TimeturnerApp {
@@ -163,9 +178,9 @@ func MakeApp(database *Database) *TimeturnerApp {
 
 	app.Router.HandleFunc("/", app.WrapHandler(ListDays)).Name("list days")
 	app.Router.HandleFunc("/{date}/", app.WrapHandler(ListTimes)).Name("list times on day")
-	app.Router.HandleFunc("/{date}/{time}", app.WrapHandler(ListSnapshots)).
+	app.Router.HandleFunc("/{date}/{time}/", app.WrapHandler(ListSnapshots)).
 		Name("list snapshots at time")
-	app.Router.HandleFunc("/{date}/{time}/{hostname}/{title}", app.WrapHandler(HandleSnapshot)).
+	app.Router.HandleFunc("/{date}/{time}/{hostname}/{title}/", app.WrapHandler(HandleSnapshot)).
 		Name("snapshot")
 
 	templateGlob := filepath.Join(".", "templates", "*.gohtml")

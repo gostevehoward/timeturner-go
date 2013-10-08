@@ -38,7 +38,7 @@ type Database struct {
 
 func InitializeDatabase(connection *sql.DB, nowFunc func() time.Time) *Database {
 	mapper := &gorp.DbMap{Db: connection, Dialect: gorp.SqliteDialect{}}
-	if false {
+	if true {
 		mapper.TraceOn("[gorp]", log.New(os.Stdout, "", log.LstdFlags|log.Lshortfile)) // TODO
 	}
 	mapper.AddTable(Snapshot{}).SetKeys(true, "Id")
@@ -114,14 +114,14 @@ func (database *Database) GetSnapshots(timestamp time.Time) []Snapshot {
 	return rows
 }
 
-func (database *Database) GetSnapshotContents(timestamp time.Time, hostname string,
-	title string) (contents string, ok bool) {
-	query := "SELECT Contents FROM Snapshot WHERE UnixTimestamp = ? AND Hostname = ? AND Title = ?"
+func (database *Database) GetSnapshotWithContents(timestamp time.Time, hostname string,
+	title string) (snapshot Snapshot, ok bool) {
+	query := "SELECT * FROM Snapshot WHERE UnixTimestamp = ? AND Hostname = ? AND Title = ?"
 	rows := database.querySnapshots(query, timestamp.Unix(), hostname, title)
 	if len(rows) == 0 {
-		return "", false
+		return Snapshot{}, false
 	} else if len(rows) == 1 {
-		return rows[0].Contents, true
+		return rows[0], true
 	} else {
 		panic(
 			fmt.Sprintf("Multiple snapshots found: timestamp %q, hostname %q, title %q",

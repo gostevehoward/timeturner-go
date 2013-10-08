@@ -82,22 +82,22 @@ func TestGetSnapshots(t *testing.T) {
 	}
 }
 
-func TestGetSnapshotContents(t *testing.T) {
+func TestGetSnapshotWithContents(t *testing.T) {
 	database := setUp()
 
 	expectedContents := "Hello world!"
 	database.AddSnapshot(now, "host1", "processes", "other contents")
 	database.AddSnapshot(now, "host1", "queries", expectedContents)
 
-	contents, ok := database.GetSnapshotContents(now, "host1", "queries")
+	snapshot, ok := database.GetSnapshotWithContents(now, "host1", "queries")
 	if !ok {
 		t.Fatalf("Failed to find snapshot contents")
 	}
-	if contents != expectedContents {
-		t.Fatalf("Unexpected contents: %q", contents)
+	if snapshot.Contents != expectedContents {
+		t.Fatalf("Unexpected contents: %q", snapshot.Contents)
 	}
 
-	_, ok = database.GetSnapshotContents(now, "host2", "foobar")
+	_, ok = database.GetSnapshotWithContents(now, "host2", "foobar")
 	if ok {
 		t.Fatalf("Found contents for nonexistent snapshot")
 	}
@@ -115,3 +115,7 @@ func TestCleanOldSnapshots(t *testing.T) {
 		t.Fatalf("Expected just one day: %q", days)
 	}
 }
+
+// TODO test no adding duplicate snapshots
+
+// TODO ensure time comes out in local timezone (or switch everything to UTC)

@@ -1,5 +1,5 @@
 {{ define "view snapshot" }}
 {{ template "header" }}
 <h1>{{ .Snapshot.Timestamp | formatDateTime }} {{ .Snapshot.Hostname }} {{ .Snapshot.Title }}</h1>
-<p>{{ .Contents }}</p>
+<p>{{ .Snapshot.Contents }}</p>
 {{ end }}
