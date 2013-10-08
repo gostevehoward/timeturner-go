@@ -10,7 +10,7 @@ import (
 )
 
 const DATE_FORMAT = "2006-01-02"
-const TIME_FORMAT = "03:04:05"
+const TIME_FORMAT = "15:04:05"
 
 func (snapshot *Snapshot) GetUrl(router *mux.Router) string {
 	urlParameters := []string{

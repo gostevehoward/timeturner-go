@@ -19,7 +19,7 @@ func setUp() *Database {
 
 func addTimestampTestData(database *Database) {
 	secondTime := now.Add(1 * time.Hour)
-	thirdTime := now.Add(23 * time.Hour)
+	thirdTime := now.Add(24 * time.Hour)
 	for _, timestamp := range []time.Time{now, secondTime, thirdTime} {
 		database.AddSnapshot(timestamp, "host1", "processes", "hello world!")
 	}
@@ -51,7 +51,7 @@ func TestGetTimestamps(t *testing.T) {
 		t.Fatalf("Unexpected timestamps: %q", timestamps)
 	}
 	for index, timestamp := range timestamps {
-		if timestamp.Format("03:04:05") != expected[index] {
+		if timestamp.Format("15:04:05") != expected[index] {
 			t.Fatalf("Unexpected timestamp at %d: %q", index, timestamps)
 		}
 	}
@@ -89,9 +89,17 @@ func TestGetSnapshotContents(t *testing.T) {
 	database.AddSnapshot(now, "host1", "processes", "other contents")
 	database.AddSnapshot(now, "host1", "queries", expectedContents)
 
-	contents := database.GetSnapshotContents(now, "host1", "queries")
+	contents, ok := database.GetSnapshotContents(now, "host1", "queries")
+	if !ok {
+		t.Fatalf("Failed to find snapshot contents")
+	}
 	if contents != expectedContents {
 		t.Fatalf("Unexpected contents: %q", contents)
+	}
+
+	_, ok = database.GetSnapshotContents(now, "host2", "foobar")
+	if ok {
+		t.Fatalf("Found contents for nonexistent snapshot")
 	}
 }
 
@@ -99,7 +107,7 @@ func TestCleanOldSnapshots(t *testing.T) {
 	database := setUp()
 
 	database.AddSnapshot(now, "host1", "processes", "")
-	now = now.Add(100 * 24 * time.Hour)
+	now = now.AddDate(0, 0, 100)
 	database.AddSnapshot(now, "host2", "queries", "")
 
 	days := database.GetAllDays()
