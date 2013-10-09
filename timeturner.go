@@ -1,6 +1,8 @@
 package timeturner
 
 import (
+	"bytes"
+	"encoding/csv"
 	"fmt"
 	"github.com/gorilla/mux"
 	"html/template"
@@ -14,7 +16,27 @@ const DATE_FORMAT = "2006-01-02"
 const TIME_FORMAT = "15:04:05"
 const DATETIME_FORMAT = "2006-01-02 15:04:05 MST"
 
-func (snapshot *Snapshot) GetUrl(router *mux.Router) string {
+func parseCsv(csvContents string) [][]string {
+	reader := csv.NewReader(bytes.NewBufferString(csvContents))
+	contents, err := reader.ReadAll()
+	if err != nil {
+		panic(err)
+	} else {
+		return contents
+	}
+}
+
+func dumpCsv(contents [][]string) string {
+	var csvContentsBuffer bytes.Buffer
+	err := csv.NewWriter(&csvContentsBuffer).WriteAll(contents)
+	if err != nil {
+		panic(err)
+	}
+	return csvContentsBuffer.String()
+}
+
+// used in templates
+func (snapshot Snapshot) GetUrl(router mux.Router) string {
 	urlParameters := []string{
 		"date", snapshot.Timestamp().Format(DATE_FORMAT),
 		"time", snapshot.Timestamp().Format(TIME_FORMAT),
@@ -29,7 +51,7 @@ func (snapshot *Snapshot) GetUrl(router *mux.Router) string {
 }
 
 type TimeturnerApp struct {
-	*Database
+	Database
 	*mux.Router
 	Templates *template.Template
 }
@@ -37,11 +59,11 @@ type TimeturnerApp struct {
 type BaseContext struct {
 	Writer    http.ResponseWriter
 	Request   *http.Request
-	App       *TimeturnerApp
+	App       TimeturnerApp
 	Timestamp time.Time
 }
 
-func (app *TimeturnerApp) WrapHandler(handler func(*BaseContext)) http.HandlerFunc {
+func (app TimeturnerApp) WrapHandler(handler func(BaseContext)) http.HandlerFunc {
 	return func(writer http.ResponseWriter, request *http.Request) {
 		log.Printf("Handling %v\n", request.URL)
 		vars := mux.Vars(request)
@@ -64,7 +86,7 @@ func (app *TimeturnerApp) WrapHandler(handler func(*BaseContext)) http.HandlerFu
 			return
 		}
 
-		handler(&BaseContext{writer, request, app, timestamp})
+		handler(BaseContext{writer, request, app, timestamp})
 	}
 }
 
@@ -74,7 +96,7 @@ var templateFunctions = template.FuncMap{
 	"formatDateTime": func(date time.Time) string { return date.Format(DATETIME_FORMAT) },
 }
 
-func (context *BaseContext) renderTemplate(templateName string, templateContext interface{}) {
+func (context BaseContext) renderTemplate(templateName string, templateContext interface{}) {
 	err := context.App.Templates.ExecuteTemplate(context.Writer, templateName, templateContext)
 	if err != nil {
 		log.Printf("ERROR: Failed to render template %v: %v\n", templateName, err)
@@ -86,7 +108,7 @@ type ListDaysContext struct {
 	Days []time.Time
 }
 
-func ListDays(context *BaseContext) {
+func ListDays(context BaseContext) {
 	context.renderTemplate(
 		"list days",
 		ListDaysContext{context.App.Router, context.App.Database.GetAllDays()},
@@ -99,7 +121,7 @@ type ListTimesContext struct {
 	Timestamps []time.Time
 }
 
-func ListTimes(context *BaseContext) {
+func ListTimes(context BaseContext) {
 	context.renderTemplate(
 		"list times",
 		ListTimesContext{
@@ -113,18 +135,18 @@ func ListTimes(context *BaseContext) {
 type ListSnapshotsContext struct {
 	*mux.Router
 	Timestamp time.Time
-	HostMap   map[string][]*Snapshot
+	HostMap   map[string][]Snapshot
 }
 
-func ListSnapshots(context *BaseContext) {
+func ListSnapshots(context BaseContext) {
 	snapshots := context.App.Database.GetSnapshots(context.Timestamp)
 
-	hostMap := make(map[string][]*Snapshot)
+	hostMap := make(map[string][]Snapshot)
 	for _, snapshot := range snapshots {
 		if _, ok := hostMap[snapshot.Hostname]; !ok {
-			hostMap[snapshot.Hostname] = make([]*Snapshot, 0)
+			hostMap[snapshot.Hostname] = make([]Snapshot, 0)
 		}
-		hostMap[snapshot.Hostname] = append(hostMap[snapshot.Hostname], &snapshot)
+		hostMap[snapshot.Hostname] = append(hostMap[snapshot.Hostname], snapshot)
 	}
 
 	context.renderTemplate(
@@ -133,7 +155,7 @@ func ListSnapshots(context *BaseContext) {
 	)
 }
 
-func addSnapshot(context *BaseContext) {
+func addSnapshot(context BaseContext) {
 	vars := mux.Vars(context.Request)
 	contents := make([]byte, 1024*1024)
 	bytesRead, err := context.Request.Body.Read(contents)
@@ -143,28 +165,34 @@ func addSnapshot(context *BaseContext) {
 		)
 	} else {
 		context.App.Database.AddSnapshot(
-			context.Timestamp, vars["hostname"], vars["title"], string(contents[:bytesRead]),
+			context.Timestamp, vars["hostname"], vars["title"],
+			parseCsv(string(contents[:bytesRead])),
 		)
 	}
 }
 
 type ViewSnapshotContext struct {
-	Snapshot *Snapshot
+	Snapshot Snapshot
+	Columns  []string
+	Data     [][]string
 }
 
-func viewSnapshot(context *BaseContext) {
+func viewSnapshot(context BaseContext) {
 	vars := mux.Vars(context.Request)
 	snapshot, ok := context.App.Database.GetSnapshotWithContents(
 		context.Timestamp, vars["hostname"], vars["title"],
 	)
 	if ok {
-		context.renderTemplate("view snapshot", ViewSnapshotContext{&snapshot})
+		contents := snapshot.Contents()
+		context.renderTemplate(
+			"view snapshot", ViewSnapshotContext{snapshot, contents[0], contents[1:]},
+		)
 	} else {
 		http.Error(context.Writer, fmt.Sprintf("No such snapshot found"), http.StatusNotFound)
 	}
 }
 
-func HandleSnapshot(context *BaseContext) {
+func HandleSnapshot(context BaseContext) {
 	if context.Request.Method == "PUT" {
 		addSnapshot(context)
 	} else {
@@ -172,8 +200,13 @@ func HandleSnapshot(context *BaseContext) {
 	}
 }
 
-func MakeApp(database *Database) *TimeturnerApp {
+func MakeApp(database Database) TimeturnerApp {
 	app := TimeturnerApp{Database: database, Router: mux.NewRouter()}
+
+	templateGlob := filepath.Join(".", "templates", "*.gohtml")
+	app.Templates = template.Must(
+		template.New("root").Funcs(templateFunctions).ParseGlob(templateGlob),
+	)
 
 	app.Router.HandleFunc("/", app.WrapHandler(ListDays)).Name("list days")
 	app.Router.HandleFunc("/{date}/", app.WrapHandler(ListTimes)).Name("list times on day")
@@ -182,10 +215,5 @@ func MakeApp(database *Database) *TimeturnerApp {
 	app.Router.HandleFunc("/{date}/{time}/{hostname}/{title}/", app.WrapHandler(HandleSnapshot)).
 		Name("snapshot")
 
-	templateGlob := filepath.Join(".", "templates", "*.gohtml")
-	app.Templates = template.Must(
-		template.New("root").Funcs(templateFunctions).ParseGlob(templateGlob),
-	)
-
-	return &app
+	return app
 }

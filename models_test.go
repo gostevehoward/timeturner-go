@@ -9,19 +9,26 @@ import (
 
 var now time.Time = time.Date(2013, 10, 6, 0, 0, 0, 0, time.Local)
 
-func setUp() *Database {
+func setUp() Database {
 	connection, err := sql.Open("sqlite3", ":memory:")
 	if err != nil {
 		panic(err)
 	}
-	return InitializeDatabase(connection, func() time.Time { return now })
+	return InitializeDatabase(connection, func() time.Time { return now }, false)
 }
 
-func addTimestampTestData(database *Database) {
+func wrapSimpleContents(contents string) [][]string {
+	return [][]string{
+		{"column"},
+		{contents},
+	}
+}
+
+func addTimestampTestData(database Database) {
 	secondTime := now.Add(1 * time.Hour)
 	thirdTime := now.Add(24 * time.Hour)
 	for _, timestamp := range []time.Time{now, secondTime, thirdTime} {
-		database.AddSnapshot(timestamp, "host1", "processes", "hello world!")
+		database.AddSnapshot(timestamp, "host1", "processes", [][]string{})
 	}
 }
 
@@ -71,7 +78,7 @@ func TestGetSnapshots(t *testing.T) {
 	}
 
 	for _, snapshot := range data {
-		database.AddSnapshot(snapshot.Timestamp(), snapshot.Hostname, snapshot.Title, "")
+		database.AddSnapshot(snapshot.Timestamp(), snapshot.Hostname, snapshot.Title, [][]string{})
 	}
 
 	snapshots := database.GetSnapshots(now)
@@ -88,15 +95,15 @@ func TestGetSnapshots(t *testing.T) {
 func TestGetSnapshotWithContents(t *testing.T) {
 	database := setUp()
 
-	expectedContents := "Hello world!"
-	database.AddSnapshot(now, "host1", "processes", "other contents")
-	database.AddSnapshot(now, "host1", "queries", expectedContents)
+	database.AddSnapshot(now, "host1", "processes", wrapSimpleContents("other data"))
+	database.AddSnapshot(now, "host1", "queries", wrapSimpleContents("Hello world!"))
 
 	snapshot, ok := database.GetSnapshotWithContents(now, "host1", "queries")
 	if !ok {
 		t.Fatalf("Failed to find snapshot contents")
 	}
-	if snapshot.Contents != expectedContents {
+	expectedContents := "column\nHello world!\n"
+	if snapshot.CsvContents != expectedContents {
 		t.Fatalf("Unexpected contents: %v", snapshot.Contents)
 	}
 
@@ -109,9 +116,9 @@ func TestGetSnapshotWithContents(t *testing.T) {
 func TestCleanOldSnapshots(t *testing.T) {
 	database := setUp()
 
-	database.AddSnapshot(now, "host1", "processes", "")
+	database.AddSnapshot(now, "host1", "processes", [][]string{})
 	now = now.AddDate(0, 0, 100)
-	database.AddSnapshot(now, "host2", "queries", "")
+	database.AddSnapshot(now, "host2", "queries", [][]string{})
 
 	days := database.GetAllDays()
 	if len(days) != 1 {
@@ -122,8 +129,8 @@ func TestCleanOldSnapshots(t *testing.T) {
 func TestOverwriteExistingSnapshot(t *testing.T) {
 	database := setUp()
 
-	database.AddSnapshot(now, "host1", "queries", "hello world")
-	database.AddSnapshot(now, "host1", "queries", "goodbye cruel world")
+	database.AddSnapshot(now, "host1", "queries", wrapSimpleContents("hello world"))
+	database.AddSnapshot(now, "host1", "queries", wrapSimpleContents("goodbye cruel world"))
 
 	snapshots := database.GetSnapshots(now)
 	if len(snapshots) != 1 {
@@ -131,7 +138,7 @@ func TestOverwriteExistingSnapshot(t *testing.T) {
 	}
 
 	snapshot, _ := database.GetSnapshotWithContents(now, "host1", "queries")
-	if snapshot.Contents != "goodbye cruel world" {
+	if snapshot.Contents()[1][0] != "goodbye cruel world" {
 		t.Fatalf("Unexpected contents: %v", snapshot.Contents)
 	}
 }
