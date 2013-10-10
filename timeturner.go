@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"path/filepath"
+	"sort"
 	"time"
 )
 
@@ -171,10 +172,35 @@ func addSnapshot(context BaseContext) {
 	}
 }
 
+type Column struct {
+	Name         string
+	IsSortColumn bool
+}
+
 type ViewSnapshotContext struct {
 	Snapshot Snapshot
-	Columns  []string
+	Columns  []Column
 	Data     [][]string
+}
+
+type SortableRows struct {
+	data            [][]string
+	sortColumnIndex int
+}
+
+func (rows SortableRows) Len() int      { return len(rows.data) }
+func (rows SortableRows) Swap(i, j int) { rows.data[i], rows.data[j] = rows.data[j], rows.data[i] }
+func (rows SortableRows) Less(i, j int) bool {
+	return rows.data[i][rows.sortColumnIndex] < rows.data[j][rows.sortColumnIndex]
+}
+
+func findColumnIndex(columns []string, desiredColumn string) int {
+	for index, columnName := range columns {
+		if columnName == desiredColumn {
+			return index
+		}
+	}
+	return -1
 }
 
 func viewSnapshot(context BaseContext) {
@@ -182,14 +208,32 @@ func viewSnapshot(context BaseContext) {
 	snapshot, ok := context.App.Database.GetSnapshotWithContents(
 		context.Timestamp, vars["hostname"], vars["title"],
 	)
-	if ok {
-		contents := snapshot.Contents()
-		context.renderTemplate(
-			"view snapshot", ViewSnapshotContext{snapshot, contents[0], contents[1:]},
-		)
-	} else {
+	if !ok {
 		http.Error(context.Writer, fmt.Sprintf("No such snapshot found"), http.StatusNotFound)
 	}
+
+	contents := snapshot.Contents()
+	columnNames := contents[0]
+	data := contents[1:]
+
+	err := context.Request.ParseForm()
+	sortKey := context.Request.Form.Get("sort")
+	if err == nil && sortKey != "" {
+		sortColumnIndex := findColumnIndex(columnNames, sortKey)
+		if sortColumnIndex != -1 {
+			sort.Sort(SortableRows{data, sortColumnIndex})
+		}
+	}
+
+	var columns []Column
+	for _, column := range columnNames {
+		columns = append(columns, Column{column, column == sortKey})
+	}
+
+	context.renderTemplate(
+		"view snapshot",
+		ViewSnapshotContext{snapshot, columns, data},
+	)
 }
 
 func HandleSnapshot(context BaseContext) {

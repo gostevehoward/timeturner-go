@@ -4,7 +4,11 @@
 <table class="snapshot-contents">
   <tr>
     {{ range .Columns }}
-      <th>{{ . }}</th>
+      <th {{ if .IsSortColumn }}class="sort-column"{{ end }}>
+        <a href="?sort={{ .Name }}">
+          {{ .Name }}
+        </a>
+      </th>
     {{ end }}
   </tr>
   {{ range .Data }}
