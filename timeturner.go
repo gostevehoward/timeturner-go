@@ -3,7 +3,6 @@ package timeturner
 import (
 	"bytes"
 	"encoding/csv"
-	"fmt"
 	"github.com/gorilla/mux"
 	"html/template"
 	"log"
@@ -36,41 +35,40 @@ func dumpCsv(contents [][]string) string {
 	return csvContentsBuffer.String()
 }
 
-// used in templates
-func (snapshot Snapshot) GetUrl(router mux.Router) string {
-	urlParameters := []string{
-		"date", snapshot.Timestamp().Format(DATE_FORMAT),
-		"time", snapshot.Timestamp().Format(TIME_FORMAT),
-		"hostname", snapshot.Hostname,
-		"title", snapshot.Title,
-	}
-	url, err := router.Get("snapshot").URL(urlParameters...)
-	if err != nil {
-		panic(err)
-	}
-	return url.String()
+type RequestInfo struct {
+	Vars      map[string]string
+	Timestamp time.Time
+	Form      map[string]string
+	Body      string
 }
 
-type TimeturnerApp struct {
-	Database
-	*mux.Router
+type Database interface {
+	AddSnapshot(timestamp time.Time, hostname string, title string, contents [][]string)
+	GetAllDays() []time.Time
+	GetTimestamps(day time.Time) []time.Time
+	GetSnapshots(timestamp time.Time) []Snapshot
+	GetSnapshotWithContents(timestamp time.Time, hostname string, title string) (
+		snapshot Snapshot, ok bool)
+}
+
+type App struct {
+	Database  Database
+	Router    *mux.Router
 	Templates *template.Template
 }
 
-type BaseContext struct {
-	Writer    http.ResponseWriter
-	Request   *http.Request
-	App       TimeturnerApp
-	Timestamp time.Time
+type Presenter struct {
+	Database    Database
+	RequestInfo RequestInfo
 }
 
-func (app TimeturnerApp) WrapHandler(handler func(BaseContext)) http.HandlerFunc {
+func (app App) WrapHandler(handler func(View)) http.HandlerFunc {
 	return func(writer http.ResponseWriter, request *http.Request) {
 		log.Printf("Handling %v\n", request.URL)
 		vars := mux.Vars(request)
+
 		date, hasDate := vars["date"]
 		time_, hasTime := vars["time"]
-
 		var timestamp time.Time
 		var err error
 		if hasDate {
@@ -87,100 +85,70 @@ func (app TimeturnerApp) WrapHandler(handler func(BaseContext)) http.HandlerFunc
 			return
 		}
 
-		handler(BaseContext{writer, request, app, timestamp})
+		var body string
+		if request.Method == "PUT" {
+			contents := make([]byte, 1024*1024)
+			bytesRead, err := request.Body.Read(contents)
+			if err != nil {
+				http.Error(
+					writer,
+					"Failed to read request body: "+err.Error(),
+					http.StatusBadRequest,
+				)
+				return
+			}
+			body = string(contents[:bytesRead])
+		}
+
+		request.ParseForm()
+		formValues := make(map[string]string)
+		for key, values := range request.Form {
+			formValues[key] = values[0]
+		}
+
+		presenter := Presenter{app.Database, RequestInfo{vars, timestamp, formValues, body}}
+		view := View{app.Router, app.Templates, writer, presenter}
+
+		handler(view)
 	}
 }
 
-var templateFunctions = template.FuncMap{
-	"formatDate":     func(date time.Time) string { return date.Format(DATE_FORMAT) },
-	"formatTime":     func(date time.Time) string { return date.Format(TIME_FORMAT) },
-	"formatDateTime": func(date time.Time) string { return date.Format(DATETIME_FORMAT) },
+func (presenter Presenter) ListDays() []time.Time {
+	return presenter.Database.GetAllDays()
 }
 
-func (context BaseContext) renderTemplate(templateName string, templateContext interface{}) {
-	err := context.App.Templates.ExecuteTemplate(context.Writer, templateName, templateContext)
-	if err != nil {
-		log.Printf("ERROR: Failed to render template %v: %v\n", templateName, err)
-	}
+func (presenter Presenter) ListTimes() (day time.Time, times []time.Time) {
+	day = presenter.RequestInfo.Timestamp
+	times = presenter.Database.GetTimestamps(presenter.RequestInfo.Timestamp)
+	return
 }
 
-type ListDaysContext struct {
-	*mux.Router
-	Days []time.Time
-}
+func (presenter Presenter) ListHostsAndTitles() (timestamp time.Time, hostMap map[string][]string) {
+	snapshots := presenter.Database.GetSnapshots(presenter.RequestInfo.Timestamp)
 
-func ListDays(context BaseContext) {
-	context.renderTemplate(
-		"list days",
-		ListDaysContext{context.App.Router, context.App.Database.GetAllDays()},
-	)
-}
-
-type ListTimesContext struct {
-	*mux.Router
-	Date       time.Time
-	Timestamps []time.Time
-}
-
-func ListTimes(context BaseContext) {
-	context.renderTemplate(
-		"list times",
-		ListTimesContext{
-			context.App.Router,
-			context.Timestamp,
-			context.App.Database.GetTimestamps(context.Timestamp),
-		},
-	)
-}
-
-type ListSnapshotsContext struct {
-	*mux.Router
-	Timestamp time.Time
-	HostMap   map[string][]Snapshot
-}
-
-func ListSnapshots(context BaseContext) {
-	snapshots := context.App.Database.GetSnapshots(context.Timestamp)
-
-	hostMap := make(map[string][]Snapshot)
+	hostMap = make(map[string][]string)
 	for _, snapshot := range snapshots {
 		if _, ok := hostMap[snapshot.Hostname]; !ok {
-			hostMap[snapshot.Hostname] = make([]Snapshot, 0)
+			hostMap[snapshot.Hostname] = make([]string, 0)
 		}
-		hostMap[snapshot.Hostname] = append(hostMap[snapshot.Hostname], snapshot)
+		hostMap[snapshot.Hostname] = append(hostMap[snapshot.Hostname], snapshot.Title)
 	}
 
-	context.renderTemplate(
-		"list snapshots",
-		ListSnapshotsContext{context.App.Router, context.Timestamp, hostMap},
-	)
+	return presenter.RequestInfo.Timestamp, hostMap
 }
 
-func addSnapshot(context BaseContext) {
-	vars := mux.Vars(context.Request)
-	contents := make([]byte, 1024*1024)
-	bytesRead, err := context.Request.Body.Read(contents)
-	if err != nil {
-		http.Error(
-			context.Writer, "Failed to read request body: "+err.Error(), http.StatusBadRequest,
-		)
-	} else {
-		context.App.Database.AddSnapshot(
-			context.Timestamp, vars["hostname"], vars["title"],
-			parseCsv(string(contents[:bytesRead])),
-		)
-	}
+func (presenter Presenter) AddSnapshot() {
+	presenter.Database.AddSnapshot(
+		presenter.RequestInfo.Timestamp,
+		presenter.RequestInfo.Vars["hostname"],
+		presenter.RequestInfo.Vars["title"],
+		parseCsv(presenter.RequestInfo.Body),
+	)
 }
 
 type Column struct {
 	Name         string
 	IsSortColumn bool
-}
-
-type ViewSnapshotContext struct {
-	Snapshot Snapshot
-	Columns  []Column
-	Data     [][]string
 }
 
 type SortableRows struct {
@@ -203,61 +171,65 @@ func findColumnIndex(columns []string, desiredColumn string) int {
 	return -1
 }
 
-func viewSnapshot(context BaseContext) {
-	vars := mux.Vars(context.Request)
-	snapshot, ok := context.App.Database.GetSnapshotWithContents(
-		context.Timestamp, vars["hostname"], vars["title"],
+func (presenter Presenter) ViewSnapshot() (
+	snapshot Snapshot, columns []Column, data [][]string, ok bool) {
+	snapshot, ok = presenter.Database.GetSnapshotWithContents(
+		presenter.RequestInfo.Timestamp,
+		presenter.RequestInfo.Vars["hostname"],
+		presenter.RequestInfo.Vars["title"],
 	)
 	if !ok {
-		http.Error(context.Writer, fmt.Sprintf("No such snapshot found"), http.StatusNotFound)
+		return
 	}
 
 	contents := snapshot.Contents()
 	columnNames := contents[0]
-	data := contents[1:]
+	data = contents[1:]
 
-	err := context.Request.ParseForm()
-	sortKey := context.Request.Form.Get("sort")
-	if err == nil && sortKey != "" {
-		sortColumnIndex := findColumnIndex(columnNames, sortKey)
-		if sortColumnIndex != -1 {
-			sort.Sort(SortableRows{data, sortColumnIndex})
+	sortColumn := presenter.RequestInfo.Form["sort"]
+	var sortColumnIndex int
+	for index, column := range columnNames {
+		columns = append(columns, Column{column, column == sortColumn})
+		if column == sortColumn {
+			sortColumnIndex = index
 		}
 	}
 
-	var columns []Column
-	for _, column := range columnNames {
-		columns = append(columns, Column{column, column == sortKey})
+	if sortColumn != "" {
+		sort.Sort(SortableRows{data, sortColumnIndex})
 	}
 
-	context.renderTemplate(
-		"view snapshot",
-		ViewSnapshotContext{snapshot, columns, data},
-	)
+	ok = true
+	return
 }
 
-func HandleSnapshot(context BaseContext) {
-	if context.Request.Method == "PUT" {
-		addSnapshot(context)
-	} else {
-		viewSnapshot(context)
-	}
-}
-
-func MakeApp(database Database) TimeturnerApp {
-	app := TimeturnerApp{Database: database, Router: mux.NewRouter()}
-
+func LoadTemplates() *template.Template {
 	templateGlob := filepath.Join(".", "templates", "*.gohtml")
-	app.Templates = template.Must(
+	return template.Must(
 		template.New("root").Funcs(templateFunctions).ParseGlob(templateGlob),
 	)
+}
 
-	app.Router.HandleFunc("/", app.WrapHandler(ListDays)).Name("list days")
-	app.Router.HandleFunc("/{date}/", app.WrapHandler(ListTimes)).Name("list times on day")
-	app.Router.HandleFunc("/{date}/{time}/", app.WrapHandler(ListSnapshots)).
-		Name("list snapshots at time")
-	app.Router.HandleFunc("/{date}/{time}/{hostname}/{title}/", app.WrapHandler(HandleSnapshot)).
-		Name("snapshot")
+func MakeApp(database Database) App {
+	router := mux.NewRouter()
+	app := App{Database: database, Router: router, Templates: LoadTemplates()}
+
+	router.HandleFunc("/", app.WrapHandler(func(v View) { v.ListDays() })).
+		Name("list days").
+		Methods("GET")
+	router.HandleFunc("/{date}/", app.WrapHandler(func(v View) { v.ListTimes() })).
+		Name("list times on day").
+		Methods("GET")
+	router.HandleFunc("/{date}/{time}/", app.WrapHandler(func(v View) { v.ListSnapshots() })).
+		Name("list snapshots at time").
+		Methods("GET")
+
+	snapshotRouter := router.PathPrefix("/{date}/{time}/{hostname}/{title}/").Subrouter()
+	snapshotRouter.HandleFunc("/", app.WrapHandler(func(v View) { v.ViewSnapshot() })).
+		Name("view snapshot").
+		Methods("GET")
+	snapshotRouter.HandleFunc("/", app.WrapHandler(func(v View) { v.AddSnapshot() })).
+		Methods("PUT")
 
 	return app
 }

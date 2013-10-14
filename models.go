@@ -35,12 +35,13 @@ func (snapshot Snapshot) Contents() [][]string {
 	return parseCsv(snapshot.CsvContents)
 }
 
-type Database struct {
+type TimeturnerDatabase struct {
 	mapper  gorp.DbMap
 	nowFunc func() time.Time
 }
 
-func InitializeDatabase(connection *sql.DB, nowFunc func() time.Time, enableLogging bool) Database {
+func InitializeDatabase(connection *sql.DB, nowFunc func() time.Time, enableLogging bool,
+) *TimeturnerDatabase {
 	mapper := gorp.DbMap{Db: connection, Dialect: gorp.SqliteDialect{}}
 	if enableLogging {
 		mapper.TraceOn("[gorp]", log.New(os.Stdout, "", log.LstdFlags|log.Lshortfile))
@@ -52,10 +53,10 @@ func InitializeDatabase(connection *sql.DB, nowFunc func() time.Time, enableLogg
 		panic(err)
 	}
 
-	return Database{mapper, nowFunc}
+	return &TimeturnerDatabase{mapper, nowFunc}
 }
 
-func (database Database) cleanOldSnapshots() {
+func (database *TimeturnerDatabase) cleanOldSnapshots() {
 	oldestAllowedTimestamp := database.nowFunc().AddDate(0, 0, -14)
 	query := "DELETE FROM Snapshot WHERE UnixTimestamp < ?"
 	_, err := database.mapper.Exec(query, oldestAllowedTimestamp.Unix())
@@ -64,7 +65,7 @@ func (database Database) cleanOldSnapshots() {
 	}
 }
 
-func (database Database) AddSnapshot(timestamp time.Time, hostname string, title string,
+func (database *TimeturnerDatabase) AddSnapshot(timestamp time.Time, hostname string, title string,
 	contents [][]string) {
 	csvContents := dumpCsv(contents)
 
@@ -93,7 +94,7 @@ func (database Database) AddSnapshot(timestamp time.Time, hostname string, title
 	}
 }
 
-func (database Database) querySnapshots(query string, args ...interface{}) []Snapshot {
+func (database *TimeturnerDatabase) querySnapshots(query string, args ...interface{}) []Snapshot {
 	var rows []Snapshot
 	_, err := database.mapper.Select(&rows, query, args...)
 	if err != nil {
@@ -115,7 +116,7 @@ func uniqueTimestamps(snapshots []Snapshot, mapTimestamp func(time.Time) time.Ti
 	return timestamps
 }
 
-func (database Database) GetAllDays() []time.Time {
+func (database *TimeturnerDatabase) GetAllDays() []time.Time {
 	query := "SELECT DISTINCT UnixTimestamp FROM Snapshot ORDER BY UnixTimestamp"
 	rows := database.querySnapshots(query)
 	return uniqueTimestamps(rows, func(timestamp time.Time) time.Time {
@@ -124,14 +125,14 @@ func (database Database) GetAllDays() []time.Time {
 	})
 }
 
-func (database Database) GetTimestamps(day time.Time) []time.Time {
+func (database *TimeturnerDatabase) GetTimestamps(day time.Time) []time.Time {
 	query := "SELECT DISTINCT UnixTimestamp FROM Snapshot " +
 		"WHERE UnixTimestamp >= ? AND UnixTimestamp < ? ORDER BY UnixTimestamp"
 	rows := database.querySnapshots(query, day.Unix(), day.AddDate(0, 0, 1).Unix())
 	return uniqueTimestamps(rows, func(timestamp time.Time) time.Time { return timestamp })
 }
 
-func (database Database) GetSnapshots(timestamp time.Time) []Snapshot {
+func (database *TimeturnerDatabase) GetSnapshots(timestamp time.Time) []Snapshot {
 	query := "SELECT Id, UnixTimestamp, Hostname, Title FROM Snapshot WHERE UnixTimestamp = ? " +
 		"ORDER BY Hostname, Title"
 	rows := database.querySnapshots(query, timestamp.Unix())
@@ -139,7 +140,7 @@ func (database Database) GetSnapshots(timestamp time.Time) []Snapshot {
 	return rows
 }
 
-func (database Database) GetSnapshotWithContents(timestamp time.Time, hostname string,
+func (database *TimeturnerDatabase) GetSnapshotWithContents(timestamp time.Time, hostname string,
 	title string) (snapshot Snapshot, ok bool) {
 	query := "SELECT * FROM Snapshot WHERE UnixTimestamp = ? AND Hostname = ? AND Title = ?"
 	rows := database.querySnapshots(query, timestamp.Unix(), hostname, title)
