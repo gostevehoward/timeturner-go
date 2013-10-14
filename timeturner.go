@@ -149,17 +149,24 @@ func (presenter Presenter) AddSnapshot() {
 type Column struct {
 	Name         string
 	IsSortColumn bool
+	ReverseLink  bool
 }
 
 type SortableRows struct {
 	data            [][]string
 	sortColumnIndex int
+	isReversed      bool
 }
 
 func (rows SortableRows) Len() int      { return len(rows.data) }
 func (rows SortableRows) Swap(i, j int) { rows.data[i], rows.data[j] = rows.data[j], rows.data[i] }
 func (rows SortableRows) Less(i, j int) bool {
-	return rows.data[i][rows.sortColumnIndex] < rows.data[j][rows.sortColumnIndex]
+	isLess := rows.data[i][rows.sortColumnIndex] < rows.data[j][rows.sortColumnIndex]
+	if rows.isReversed {
+		return !isLess
+	} else {
+		return isLess
+	}
 }
 
 func findColumnIndex(columns []string, desiredColumn string) int {
@@ -187,16 +194,20 @@ func (presenter Presenter) ViewSnapshot() (
 	data = contents[1:]
 
 	sortColumn := presenter.RequestInfo.Form["sort"]
+	_, isReversed := presenter.RequestInfo.Form["reverse"]
 	var sortColumnIndex int
-	for index, column := range columnNames {
-		columns = append(columns, Column{column, column == sortColumn})
-		if column == sortColumn {
+	for index, columnName := range columnNames {
+		column := Column{columnName, false, false}
+		if columnName == sortColumn {
+			column.IsSortColumn = true
+			column.ReverseLink = !isReversed
 			sortColumnIndex = index
 		}
+		columns = append(columns, column)
 	}
 
 	if sortColumn != "" {
-		sort.Sort(SortableRows{data, sortColumnIndex})
+		sort.Sort(SortableRows{data, sortColumnIndex, isReversed})
 	}
 
 	ok = true

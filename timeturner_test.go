@@ -94,6 +94,13 @@ func TestViewSnapshotWithSorting(t *testing.T) {
 	if !isDataOk {
 		t.Fatalf("Unexpected data %v", data)
 	}
+
+	presenter.RequestInfo.Form["reverse"] = ""
+	_, _, data, _ = presenter.ViewSnapshot()
+	if data[0][0] != "key2" {
+		t.Fatalf("Unexpected data %v", data)
+	}
+
 }
 
 func TestViewSnapshotNotFound(t *testing.T) {

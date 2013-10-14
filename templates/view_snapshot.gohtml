@@ -5,7 +5,7 @@
   <tr>
     {{ range .Columns }}
       <th {{ if .IsSortColumn }}class="sort-column"{{ end }}>
-        <a href="?sort={{ .Name }}">
+        <a href="?sort={{ .Name }}{{ if .ReverseLink }}&reverse{{ end }}">
           {{ .Name }}
         </a>
       </th>
