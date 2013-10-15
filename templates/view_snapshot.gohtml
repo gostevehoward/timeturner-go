@@ -1,6 +1,18 @@
 {{ define "view snapshot" }}
 {{ template "header" }}
-<h1>{{ .Snapshot.Timestamp | formatDateTime }} {{ .Snapshot.Hostname }} {{ .Snapshot.Title }}</h1>
+{{ $dateString := formatDate .Snapshot.Timestamp }}
+{{ $timeString := formatTime .Snapshot.Timestamp }}
+<h1>
+  <a href="{{ getUrl "list times on day" "date" $dateString }}">
+    {{ $dateString }}
+  </a>
+  &raquo;
+  <a href="{{ getUrl "list snapshots at time" "date" $dateString "time" $timeString }}">
+    {{ $timeString }}
+  </a>
+  &raquo;
+  {{ .Snapshot.Hostname }} &raquo; {{ .Snapshot.Title }}</h1>
+</h1>
 <table class="snapshot-contents">
   <tr>
     {{ range .Columns }}

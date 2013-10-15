@@ -1,10 +1,9 @@
 {{ define "list days" }}
-{{ $dateRoute := .Router.Get "list times on day" }}
 {{ template "header" }}
 <ol>
   {{ range .Days }}
     <li>
-      <a href="{{ $dateRoute.URL "date" (formatDate .) }}">
+      <a href="{{ getUrl "list times on day" "date" (formatDate .) }}">
         {{ formatDate . }}
       </a>
     </li>

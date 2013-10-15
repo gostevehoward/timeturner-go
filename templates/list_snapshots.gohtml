@@ -1,8 +1,13 @@
 {{ define "list snapshots" }}
 {{ template "header" }}
-{{ $router := .Router }}
 {{ $timestamp := .Timestamp }}
-<h1>{{ formatDateTime .Timestamp }}</h1>
+<h1>
+  <a href="{{ getUrl "list times on day" "date" (formatDate .Timestamp) }}">
+    {{ formatDate .Timestamp }}
+  </a>
+  &raquo;
+  {{ formatTime .Timestamp }}
+</h1>
 <ul>
   {{ range $hostname, $titles := .HostMap }}
     <li>
@@ -10,7 +15,7 @@
       <ul>
         {{ range $titles }}
           <li>
-            <a href="{{ getSnapshotUrl $router $timestamp $hostname . }}">
+            <a href="{{ getSnapshotUrl $timestamp $hostname . }}">
               {{ . }}
             </a>
           </li>

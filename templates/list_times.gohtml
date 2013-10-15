@@ -1,11 +1,10 @@
 {{ define "list times" }}
-{{ $dateTimeRoute := .Router.Get "list snapshots at time" }}
 {{ template "header" }}
 <h1>{{ formatDate .Date }}</h1>
 <ol>
   {{ range .Timestamps }}
     <li>
-      <a href="{{ $dateTimeRoute.URL "date" (formatDate .) "time" (formatTime .) }}">
+      <a href="{{ getUrl "list snapshots at time" "date" (formatDate .) "time" (formatTime .) }}">
         {{ formatTime . }}
       </a>
     </li>
