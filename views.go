@@ -8,6 +8,10 @@ import (
 	"time"
 )
 
+const DATE_FORMAT = "2006-01-02"
+const TIME_FORMAT = "15:04:05"
+const DATETIME_FORMAT = "2006-01-02 15:04:05 MST"
+
 func makeTemplateFunctions(router *mux.Router) template.FuncMap {
 	getUrl := func(templateName string, urlParameters ...string) string {
 		url, err := router.Get(templateName).URL(urlParameters...)

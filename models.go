@@ -1,13 +1,34 @@
 package timeturner
 
 import (
+	"bytes"
 	"database/sql"
+	"encoding/csv"
 	"fmt"
 	"github.com/coopernurse/gorp"
 	"log"
 	"os"
 	"time"
 )
+
+func parseCsv(csvContents string) [][]string {
+	reader := csv.NewReader(bytes.NewBufferString(csvContents))
+	contents, err := reader.ReadAll()
+	if err != nil {
+		panic(err)
+	} else {
+		return contents
+	}
+}
+
+func dumpCsv(contents [][]string) string {
+	var csvContentsBuffer bytes.Buffer
+	err := csv.NewWriter(&csvContentsBuffer).WriteAll(contents)
+	if err != nil {
+		panic(err)
+	}
+	return csvContentsBuffer.String()
+}
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS Snapshot (

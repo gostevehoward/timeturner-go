@@ -1,34 +1,9 @@
 package timeturner
 
 import (
-	"bytes"
-	"encoding/csv"
 	"sort"
 	"time"
 )
-
-const DATE_FORMAT = "2006-01-02"
-const TIME_FORMAT = "15:04:05"
-const DATETIME_FORMAT = "2006-01-02 15:04:05 MST"
-
-func parseCsv(csvContents string) [][]string {
-	reader := csv.NewReader(bytes.NewBufferString(csvContents))
-	contents, err := reader.ReadAll()
-	if err != nil {
-		panic(err)
-	} else {
-		return contents
-	}
-}
-
-func dumpCsv(contents [][]string) string {
-	var csvContentsBuffer bytes.Buffer
-	err := csv.NewWriter(&csvContentsBuffer).WriteAll(contents)
-	if err != nil {
-		panic(err)
-	}
-	return csvContentsBuffer.String()
-}
 
 type RequestInfo struct {
 	Vars      map[string]string
